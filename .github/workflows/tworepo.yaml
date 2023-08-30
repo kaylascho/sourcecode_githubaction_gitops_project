@@ -1,0 +1,75 @@
+name: Custom CI/CD Workflow - Two Repos
+
+on:
+  #pull_request:
+  #  branches:
+  #    - master
+  #push:
+  #  branches:
+  #    - master
+  #schedule:
+  #  - cron: "0 0 * * *"
+
+  workflow_dispatch:
+    
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Install Java
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-jre default-jdk
+
+      - name: Build Application with Maven
+        run: mvn clean install -B
+
+      - name: Docker Build
+        run: docker build . --file Dockerfile --tag kaylascho/spring-boot-mongo:${{ github.sha }}
+
+      - name: Docker Login    # DOCKER_HUB_PASSWORD and DOCKER_HUB_USERNAME must be defined in the secret of githubaction_project repo
+        run: echo ${{ secrets.DOCKER_HUB_PASSWORD }} | docker login docker.io -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
+
+      - name: Docker Push to Docker Hub
+        run: docker push kaylascho/spring-boot-mongo:${{ github.sha }}
+
+
+      - name: Download and Run Trivy Scan on image
+        run: |
+          wget https://github.com/aquasecurity/trivy/releases/download/v0.19.2/trivy_0.19.2_Linux-64bit.deb
+          sudo dpkg -i trivy_0.19.2_Linux-64bit.deb
+          trivy image kaylascho/spring-boot-mongo:${{ github.sha }}
+
+
+      - name: Debugging Step - Print GitHub SHA
+        run: |
+          echo "GitHub SHA: ${{ github.sha }}"
+
+      - name: Debugging Step - Print Values Before Update
+        run: |
+          echo "Repository: kaylascho/manifest_githubaction_gitops_project"
+          echo "Path: k8s/springapp/values.yaml"
+          echo "Property Path: 'tag'"
+          echo "Value to Update: ${{ github.sha }}"
+          echo "Branch: master"
+          echo "Target Branch: master"
+          echo "API Token: ${{ secrets.GITHUBACTION_TOKEN }}"
+
+      - name: Update Version in values.yaml
+        run: python .github/update_yaml.py
+        env:
+          VALUE_TO_UPDATE: ${{ github.sha }}
+          PROPERTY_PATH: "tag"
+          GITHUB_TOKEN: ${{ secrets.GITHUBACTION_TOKEN }}  # This token has access to githubaction_project. That is,
+                                                            # It is located in githubaction_project repo to give access to update gitops_project repo
+                                                            # Therefore, no token is required in the gitops_project repo
+      - name: Debugging Step - Print Action Output
+        run: echo "Action Output:" && cat $GITHUB_WORKSPACE/yaml-update-action.log || echo "File not found"
+
+# source code repo name is https://github.com/kaylascho/sourcecode_githubaction_gitops_project
+# Manifest files repo name is https://github.com/kaylascho/manifest_githubaction_gitops_project
